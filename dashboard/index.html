@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Retail Lakehouse — Live Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & Base ────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --surface2:  #222536;
+      --border:    #2e3350;
+      --accent:    #6366f1;
+      --accent2:   #22d3ee;
+      --gold:      #f59e0b;
+      --silver:    #94a3b8;
+      --bronze:    #cd7f32;
+      --green:     #10b981;
+      --red:       #ef4444;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --radius:    12px;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #1e1b4b 0%, #1a1d27 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo-icon {
+      width: 40px; height: 40px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+    }
+    .logo h1 { font-size: 18px; font-weight: 700; }
+    .logo p  { font-size: 12px; color: var(--muted); }
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    .live-badge {
+      background: rgba(16,185,129,0.15);
+      border: 1px solid rgba(16,185,129,0.4);
+      color: #10b981;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .live-dot {
+      width: 8px; height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.5; transform: scale(1.3); }
+    }
+    #last-updated { font-size: 12px; color: var(--muted); }
+
+    /* ── Main Layout ─────────────────────────────────────────────────────── */
+    main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
+
+    /* ── Section headings ────────────────────────────────────────────────── */
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+      margin-top: 32px;
+    }
+
+    /* ── KPI Cards ───────────────────────────────────────────────────────── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: transform .2s, box-shadow .2s;
+    }
+    .kpi-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+    }
+    .kpi-card.green::before  { background: linear-gradient(90deg, #10b981, #059669); }
+    .kpi-card.gold::before   { background: linear-gradient(90deg, #f59e0b, #d97706); }
+    .kpi-card.red::before    { background: linear-gradient(90deg, #ef4444, #dc2626); }
+    .kpi-card.cyan::before   { background: linear-gradient(90deg, #22d3ee, #0891b2); }
+    .kpi-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .05em; }
+    .kpi-value { font-size: 28px; font-weight: 700; line-height: 1; }
+    .kpi-sub   { font-size: 12px; margin-top: 8px; }
+    .up   { color: var(--green); }
+    .down { color: var(--red); }
+    .flat { color: var(--muted); }
+
+    /* ── Tabs ────────────────────────────────────────────────────────────── */
+    .tab-bar {
+      display: flex; gap: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 4px;
+      margin-bottom: 20px;
+      width: fit-content;
+    }
+    .tab-btn {
+      padding: 8px 18px;
+      border-radius: 7px;
+      border: none;
+      background: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all .15s;
+    }
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .tab-btn:hover:not(.active) { background: var(--border); color: var(--text); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* ── Charts ──────────────────────────────────────────────────────────── */
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .chart-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .chart-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+    .chart-card h3 span { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 8px; }
+    .chart-wrapper { position: relative; height: 260px; }
+    .chart-wrapper.tall { height: 320px; }
+
+    /* ── Table ───────────────────────────────────────────────────────────── */
+    .table-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .table-card h3 {
+      font-size: 14px;
+      font-weight: 600;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      padding: 10px 16px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: var(--surface2);
+    }
+    td {
+      padding: 11px 16px;
+      font-size: 13px;
+      border-top: 1px solid var(--border);
+    }
+    tr:hover td { background: var(--surface2); }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-green  { background: rgba(16,185,129,0.15); color: #10b981; }
+    .badge-red    { background: rgba(239,68,68,0.15);  color: #ef4444; }
+    .badge-yellow { background: rgba(245,158,11,0.15); color: #f59e0b; }
+
+    /* ── Medallion Architecture ──────────────────────────────────────────── */
+    .arch-row {
+      display: flex; gap: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .arch-layer {
+      flex: 1; padding: 20px 16px;
+      border-right: 1px solid var(--border);
+    }
+    .arch-layer:last-child { border-right: none; }
+    .arch-layer h4 { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+    .arch-layer p  { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .arch-layer ul { list-style: none; margin-top: 10px; }
+    .arch-layer ul li { font-size: 12px; color: var(--muted); padding: 2px 0; }
+    .arch-layer ul li::before { content: "→ "; color: var(--accent); }
+    .layer-bronze h4 { color: #cd7f32; }
+    .layer-silver h4 { color: #94a3b8; }
+    .layer-gold   h4 { color: #f59e0b; }
+    .arrow-sep {
+      width: 32px; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      main { padding: 16px; }
+      .chart-grid   { grid-template-columns: 1fr; }
+      .chart-grid-3 { grid-template-columns: 1fr; }
+      .kpi-grid     { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🏪</div>
+    <div>
+      <h1>Retail Lakehouse</h1>
+      <p>Delta Lake · Databricks · Medallion Architecture</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <span id="last-updated">Updated: —</span>
+    <div class="live-badge"><div class="live-dot"></div>Live</div>
+  </div>
+</header>
+
+<!-- ── Main ── -->
+<main>
+
+  <!-- KPI Cards -->
+  <p class="section-title">Key Performance Indicators</p>
+  <div class="kpi-grid">
+    <div class="kpi-card green">
+      <div class="kpi-label">Total Revenue (MTD)</div>
+      <div class="kpi-value" id="kpi-revenue">$0</div>
+      <div class="kpi-sub up" id="kpi-revenue-wow">▲ 0% WoW</div>
+    </div>
+    <div class="kpi-card gold">
+      <div class="kpi-label">Total Orders (MTD)</div>
+      <div class="kpi-value" id="kpi-orders">0</div>
+      <div class="kpi-sub up" id="kpi-orders-wow">▲ 0% WoW</div>
+    </div>
+    <div class="kpi-card cyan">
+      <div class="kpi-label">Units Sold (MTD)</div>
+      <div class="kpi-value" id="kpi-units">0</div>
+      <div class="kpi-sub flat" id="kpi-units-wow">— 0% WoW</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Avg Order Value</div>
+      <div class="kpi-value" id="kpi-aov">$0</div>
+      <div class="kpi-sub up" id="kpi-aov-wow">▲ 0% WoW</div>
+    </div>
+    <div class="kpi-card red">
+      <div class="kpi-label">Discount Rate</div>
+      <div class="kpi-value" id="kpi-discount">0%</div>
+      <div class="kpi-sub flat" id="kpi-discount-wow">— 0% vs last wk</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Low-Stock SKUs</div>
+      <div class="kpi-value" id="kpi-lowstock">0</div>
+      <div class="kpi-sub" id="kpi-lowstock-sub" style="color:var(--muted)">across all stores</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <p class="section-title" style="margin-top:36px">Analytics</p>
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('daily')">Daily Sales</button>
+    <button class="tab-btn" onclick="switchTab('products')">Product Performance</button>
+    <button class="tab-btn" onclick="switchTab('weekly')">Weekly Trends</button>
+    <button class="tab-btn" onclick="switchTab('arch')">Architecture</button>
+  </div>
+
+  <!-- ── Tab: Daily Sales ─────────────────────────────────────────────────── -->
+  <div id="tab-daily" class="tab-content active">
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>Net Revenue by Day <span>last 30 days</span></h3>
+        <div class="chart-wrapper"><canvas id="chartDailyRevenue"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Channel Mix <span>MTD revenue</span></h3>
+        <div class="chart-wrapper"><canvas id="chartChannelMix"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>Units Sold &amp; Transactions <span>daily, last 30 days</span></h3>
+        <div class="chart-wrapper"><canvas id="chartUnitsTransactions"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Avg Order Value Trend <span>30-day</span></h3>
+        <div class="chart-wrapper"><canvas id="chartAOV"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tab: Product Performance ──────────────────────────────────────────── -->
+  <div id="tab-products" class="tab-content">
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>Top 10 Products by Revenue</h3>
+        <div class="chart-wrapper tall"><canvas id="chartTopProducts"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Revenue Share (Pareto)</h3>
+        <div class="chart-wrapper tall"><canvas id="chartPareto"></canvas></div>
+      </div>
+    </div>
+    <div class="table-card">
+      <h3>🔴 High-Revenue Low-Stock Alert</h3>
+      <table id="lowStockTable">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Product ID</th>
+            <th>Revenue</th>
+            <th>Stock on Hand</th>
+            <th>Days of Supply</th>
+            <th>Stores Low</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="lowStockBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Tab: Weekly Trends ─────────────────────────────────────────────────── -->
+  <div id="tab-weekly" class="tab-content">
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>Weekly Revenue by Channel <span>last 12 weeks</span></h3>
+        <div class="chart-wrapper tall"><canvas id="chartWeeklyRevenue"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>WoW Revenue Change % <span>by channel</span></h3>
+        <div class="chart-wrapper tall"><canvas id="chartWoW"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <h3>Trend Signal Distribution <span>weekly classification</span></h3>
+      <div class="chart-wrapper" style="height:200px"><canvas id="chartTrendSignal"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ── Tab: Architecture ─────────────────────────────────────────────────── -->
+  <div id="tab-arch" class="tab-content">
+    <p class="section-title">Medallion Architecture</p>
+    <div class="arch-row">
+      <div class="arch-layer layer-bronze">
+        <h4>🥉 Bronze Layer</h4>
+        <p>Raw ingestion with schema enforcement. No transformation. Full audit trail.</p>
+        <ul>
+          <li>raw_sales</li>
+          <li>raw_orders</li>
+          <li>raw_inventory</li>
+        </ul>
+      </div>
+      <div class="arrow-sep">→</div>
+      <div class="arch-layer layer-silver">
+        <h4>🥈 Silver Layer</h4>
+        <p>Cleansed, deduped, type-cast and enriched data. SCD-1 upserts via Delta MERGE.</p>
+        <ul>
+          <li>sales (with revenue, margins, date dims)</li>
+          <li>orders (with days_to_ship)</li>
+          <li>inventory (with low_stock flag)</li>
+        </ul>
+      </div>
+      <div class="arrow-sep">→</div>
+      <div class="arch-layer layer-gold">
+        <h4>🥇 Gold Layer</h4>
+        <p>Business-ready aggregations consumed by dashboards and BI tools.</p>
+        <ul>
+          <li>daily_sales_summary</li>
+          <li>product_performance</li>
+          <li>weekly_trends</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="chart-grid-3">
+      <div class="chart-card">
+        <h3>Data Pipeline Flow</h3>
+        <div class="chart-wrapper" style="height:220px"><canvas id="chartPipelineFlow"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Table Row Counts</h3>
+        <div class="chart-wrapper" style="height:220px"><canvas id="chartTableCounts"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Layer Storage (GB)</h3>
+        <div class="chart-wrapper" style="height:220px"><canvas id="chartStorage"></canvas></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ──────────────────────────────────────────────────────────────────────────
+   SIMULATED DATA
+   In production, replace generateData() / all hardcoded arrays with
+   fetch() calls to your Databricks SQL Warehouse REST endpoint or
+   an exported JSON file refreshed by a GitHub Actions workflow.
+────────────────────────────────────────────────────────────────────────── */
+
+const CHART_DEFAULTS = {
+  color: '#e2e8f0',
+  gridColor: 'rgba(255,255,255,0.05)',
+  tickColor: '#64748b',
+};
+
+Chart.defaults.color = CHART_DEFAULTS.color;
+
+/* ── Helpers ── */
+function fmt$(n)  { return '$' + (n>=1e6 ? (n/1e6).toFixed(2)+'M' : n>=1e3 ? (n/1e3).toFixed(1)+'K' : n.toFixed(0)); }
+function fmtK(n)  { return n>=1e3 ? (n/1e3).toFixed(1)+'K' : String(n); }
+function rnd(a,b) { return Math.round(a + Math.random()*(b-a)); }
+function rndf(a,b){ return +(a + Math.random()*(b-a)).toFixed(2); }
+
+/* ── Generate demo data ── */
+function generateDailyData(days=30) {
+  const dates=[], online=[], instore=[], units=[], txns=[], aov=[];
+  let d = new Date(); d.setDate(d.getDate()-days+1);
+  for(let i=0;i<days;i++){
+    dates.push(d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+    const o = rnd(8000,24000), s = rnd(12000,32000);
+    online.push(o); instore.push(s);
+    units.push(rnd(200,600));
+    txns.push(rnd(80,220));
+    aov.push(rndf(85,140));
+    d.setDate(d.getDate()+1);
+  }
+  return {dates, online, instore, units, txns, aov};
+}
+
+function generateWeeklyData(weeks=12) {
+  const labels=[], online=[], instore=[], mobile=[], wowO=[], wowS=[];
+  for(let i=weeks;i>=1;i--){
+    labels.push(`W-${i}`);
+    const o=rnd(55000,120000), s=rnd(80000,200000), m=rnd(20000,60000);
+    online.push(o); instore.push(s); mobile.push(m);
+    wowO.push(rndf(-8,12)); wowS.push(rndf(-5,9));
+  }
+  return {labels, online, instore, mobile, wowO, wowS};
+}
+
+function generateProducts() {
+  const products=[];
+  const names=['SKU-A','SKU-B','SKU-C','SKU-D','SKU-E','SKU-F','SKU-G','SKU-H','SKU-I','SKU-J'];
+  let cumRev=0, totalRev=0;
+  const revs = names.map(()=>rnd(5000,80000));
+  totalRev = revs.reduce((a,b)=>a+b,0);
+  revs.sort((a,b)=>b-a);
+  return revs.map((r,i)=>{
+    cumRev+=r;
+    return {
+      id: names[i],
+      revenue: r,
+      units: rnd(100,800),
+      stock: rnd(0,300),
+      days_supply: rndf(1,45),
+      stores_low: rnd(0,8),
+      rank: i+1,
+      cum_pct: +(cumRev/totalRev*100).toFixed(1)
+    };
+  });
+}
+
+/* ── Initialise ── */
+const daily    = generateDailyData();
+const weekly   = generateWeeklyData();
+const products = generateProducts();
+
+/* ── Update KPIs ── */
+const totalRev    = daily.online.reduce((a,b)=>a+b,0) + daily.instore.reduce((a,b)=>a+b,0);
+const totalOrders = daily.txns.reduce((a,b)=>a+b,0);
+const totalUnits  = daily.units.reduce((a,b)=>a+b,0);
+const avgAOV      = daily.aov.reduce((a,b)=>a+b,0)/daily.aov.length;
+const lowStockCount = products.filter(p=>p.stores_low>0).length;
+
+document.getElementById('kpi-revenue').textContent   = fmt$(totalRev);
+document.getElementById('kpi-orders').textContent    = fmtK(totalOrders);
+document.getElementById('kpi-units').textContent     = fmtK(totalUnits);
+document.getElementById('kpi-aov').textContent       = '$'+avgAOV.toFixed(0);
+document.getElementById('kpi-discount').textContent  = rndf(4,11).toFixed(1)+'%';
+document.getElementById('kpi-lowstock').textContent  = lowStockCount;
+
+const wows = ['+12.4%','▲ +8.1%','— +0.3%','▲ +5.2%','▼ -0.8%'];
+document.getElementById('kpi-revenue-wow').innerHTML  = '<span class="up">▲ +12.4% WoW</span>';
+document.getElementById('kpi-orders-wow').innerHTML   = '<span class="up">▲ +8.1% WoW</span>';
+document.getElementById('kpi-units-wow').innerHTML    = '<span class="flat">— +0.3% WoW</span>';
+document.getElementById('kpi-aov-wow').innerHTML      = '<span class="up">▲ +5.2% WoW</span>';
+document.getElementById('kpi-discount-wow').innerHTML = '<span class="down">▼ -0.8% vs last wk</span>';
+
+/* ── Timestamp ── */
+document.getElementById('last-updated').textContent =
+  'Updated: '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+
+/* ── Shared axis options ── */
+const axis = (title='')=>({
+  grid:  { color: CHART_DEFAULTS.gridColor },
+  ticks: { color: CHART_DEFAULTS.tickColor },
+  ...(title ? {title:{display:true,text:title,color:CHART_DEFAULTS.tickColor,font:{size:11}}} : {})
+});
+
+/* ─────────────────── DAILY SALES TAB ─────────────────── */
+
+/* Chart 1: Revenue by Day */
+new Chart(document.getElementById('chartDailyRevenue'), {
+  type:'bar',
+  data:{
+    labels: daily.dates,
+    datasets:[
+      { label:'Online',   data: daily.online,  backgroundColor:'rgba(99,102,241,0.7)',  borderRadius:4 },
+      { label:'In-Store', data: daily.instore, backgroundColor:'rgba(34,211,238,0.7)', borderRadius:4 },
+    ]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{labels:{color:'#e2e8f0'}} },
+    scales:{ x:axis(), y:axis('Revenue ($)') }
+  }
+});
+
+/* Chart 2: Channel Donut */
+const onlineTotal  = daily.online.reduce((a,b)=>a+b,0);
+const instoreTotal = daily.instore.reduce((a,b)=>a+b,0);
+new Chart(document.getElementById('chartChannelMix'), {
+  type:'doughnut',
+  data:{
+    labels:['Online','In-Store'],
+    datasets:[{
+      data:[onlineTotal, instoreTotal],
+      backgroundColor:['rgba(99,102,241,0.85)','rgba(34,211,238,0.85)'],
+      borderColor:'#1a1d27', borderWidth:3
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{
+      legend:{ position:'bottom', labels:{color:'#e2e8f0', padding:16} },
+      tooltip:{ callbacks:{ label: ctx=>' '+fmt$(ctx.raw) } }
+    },
+    cutout:'65%'
+  }
+});
+
+/* Chart 3: Units + Transactions */
+new Chart(document.getElementById('chartUnitsTransactions'), {
+  type:'line',
+  data:{
+    labels: daily.dates,
+    datasets:[
+      {
+        label:'Units Sold', data:daily.units,
+        borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.1)',
+        tension:0.3, fill:true, pointRadius:2
+      },
+      {
+        label:'Transactions', data:daily.txns,
+        borderColor:'#10b981', backgroundColor:'rgba(16,185,129,0.1)',
+        tension:0.3, fill:true, pointRadius:2, yAxisID:'y2'
+      }
+    ]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{labels:{color:'#e2e8f0'}} },
+    scales:{
+      x:axis(),
+      y:{ ...axis('Units'), position:'left', grid:{color:CHART_DEFAULTS.gridColor} },
+      y2:{ ...axis('Transactions'), position:'right', grid:{drawOnChartArea:false} }
+    }
+  }
+});
+
+/* Chart 4: AOV */
+new Chart(document.getElementById('chartAOV'), {
+  type:'line',
+  data:{
+    labels: daily.dates,
+    datasets:[{
+      label:'Avg Order Value ($)', data:daily.aov,
+      borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,0.15)',
+      tension:0.4, fill:true, pointRadius:2
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{labels:{color:'#e2e8f0'}} },
+    scales:{ x:axis(), y:axis('AOV ($)') }
+  }
+});
+
+/* ─────────────────── PRODUCTS TAB ─────────────────── */
+
+new Chart(document.getElementById('chartTopProducts'), {
+  type:'bar',
+  data:{
+    labels: products.slice(0,10).map(p=>p.id),
+    datasets:[{
+      label:'Revenue',
+      data: products.slice(0,10).map(p=>p.revenue),
+      backgroundColor: products.slice(0,10).map((_,i)=>
+        `hsl(${245+i*8},70%,${60-i*2}%)`
+      ),
+      borderRadius:5
+    }]
+  },
+  options:{
+    indexAxis:'y',
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{
+      x:axis('Revenue ($)'),
+      y:{ grid:{color:CHART_DEFAULTS.gridColor}, ticks:{color:'#e2e8f0'} }
+    }
+  }
+});
+
+new Chart(document.getElementById('chartPareto'), {
+  type:'bar',
+  data:{
+    labels: products.map(p=>p.id),
+    datasets:[
+      {
+        type:'bar',
+        label:'Revenue',
+        data: products.map(p=>p.revenue),
+        backgroundColor:'rgba(99,102,241,0.7)',
+        borderRadius:3, yAxisID:'y'
+      },
+      {
+        type:'line',
+        label:'Cumulative %',
+        data: products.map(p=>p.cum_pct),
+        borderColor:'#f59e0b',
+        pointRadius:3, tension:0.1, yAxisID:'y2'
+      }
+    ]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{labels:{color:'#e2e8f0'}} },
+    scales:{
+      x:axis(),
+      y:axis('Revenue ($)'),
+      y2:{ ...axis('Cum %'), position:'right', max:100, grid:{drawOnChartArea:false} }
+    }
+  }
+});
+
+/* Low-stock table */
+const lowRisk = products.filter(p=>p.stores_low>0 && p.rank<=8);
+const tbody = document.getElementById('lowStockBody');
+lowRisk.forEach(p=>{
+  const urgency = p.days_supply < 7 ? 'badge-red' : p.days_supply<14 ? 'badge-yellow' : 'badge-green';
+  const label   = p.days_supply < 7 ? 'CRITICAL' : p.days_supply<14 ? 'LOW' : 'WATCH';
+  tbody.innerHTML += `<tr>
+    <td>#${p.rank}</td>
+    <td>${p.id}</td>
+    <td>${fmt$(p.revenue)}</td>
+    <td>${p.stock}</td>
+    <td>${p.days_supply}d</td>
+    <td>${p.stores_low}</td>
+    <td><span class="badge ${urgency}">${label}</span></td>
+  </tr>`;
+});
+
+/* ─────────────────── WEEKLY TAB ─────────────────── */
+
+new Chart(document.getElementById('chartWeeklyRevenue'), {
+  type:'bar',
+  data:{
+    labels: weekly.labels,
+    datasets:[
+      { label:'Online',   data:weekly.online,  backgroundColor:'rgba(99,102,241,0.8)', borderRadius:4 },
+      { label:'In-Store', data:weekly.instore, backgroundColor:'rgba(34,211,238,0.8)', borderRadius:4 },
+      { label:'Mobile',   data:weekly.mobile,  backgroundColor:'rgba(245,158,11,0.8)', borderRadius:4 },
+    ]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{labels:{color:'#e2e8f0'}} },
+    scales:{ x:axis(), y:axis('Revenue ($)') }
+  }
+});
+
+new Chart(document.getElementById('chartWoW'), {
+  type:'line',
+  data:{
+    labels: weekly.labels,
+    datasets:[
+      {
+        label:'Online WoW%', data:weekly.wowO,
+        borderColor:'#6366f1', tension:0.3, pointRadius:4,
+        segment:{ borderColor: ctx=>ctx.p1.parsed.y<0?'#ef4444':'#10b981' }
+      },
+      {
+        label:'In-Store WoW%', data:weekly.wowS,
+        borderColor:'#22d3ee', tension:0.3, pointRadius:4,
+        segment:{ borderColor: ctx=>ctx.p1.parsed.y<0?'#ef4444':'#10b981' }
+      }
+    ]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{labels:{color:'#e2e8f0'}} },
+    scales:{ x:axis(), y:{...axis('WoW Change %'), min:-15, max:20} }
+  }
+});
+
+new Chart(document.getElementById('chartTrendSignal'), {
+  type:'bar',
+  data:{
+    labels:['ACCELERATING','GROWING','FLAT','SLOWING','DECLINING'],
+    datasets:[{
+      label:'Week-Channel Count',
+      data:[rnd(4,10),rnd(8,18),rnd(2,6),rnd(2,6),rnd(1,4)],
+      backgroundColor:[
+        'rgba(16,185,129,0.8)','rgba(99,102,241,0.8)','rgba(148,163,184,0.5)',
+        'rgba(245,158,11,0.8)','rgba(239,68,68,0.8)'
+      ],
+      borderRadius:5
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{ x:axis(), y:axis('Count') }
+  }
+});
+
+/* ─────────────────── ARCHITECTURE TAB ─────────────────── */
+
+new Chart(document.getElementById('chartPipelineFlow'), {
+  type:'bar',
+  data:{
+    labels:['Bronze','Silver','Gold'],
+    datasets:[{
+      label:'Avg Processing Time (s)',
+      data:[rnd(12,30), rnd(25,60), rnd(8,20)],
+      backgroundColor:['rgba(205,127,50,0.8)','rgba(148,163,184,0.8)','rgba(245,158,11,0.8)'],
+      borderRadius:6
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{ x:{grid:{color:CHART_DEFAULTS.gridColor},ticks:{color:'#e2e8f0'}}, y:axis('Seconds') }
+  }
+});
+
+new Chart(document.getElementById('chartTableCounts'), {
+  type:'bar',
+  data:{
+    labels:['raw_sales','raw_orders','raw_inv','sales','orders','inventory','daily_sales','prod_perf','weekly'],
+    datasets:[{
+      label:'Row Count (K)',
+      data:[480,210,95,475,208,94,30,42,36].map(v=>v+rnd(0,30)),
+      backgroundColor:'rgba(99,102,241,0.75)',
+      borderRadius:4
+    }]
+  },
+  options:{
+    indexAxis:'y',
+    responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false} },
+    scales:{
+      x:axis('Rows (K)'),
+      y:{grid:{color:CHART_DEFAULTS.gridColor},ticks:{color:'#e2e8f0',font:{size:10}}}
+    }
+  }
+});
+
+new Chart(document.getElementById('chartStorage'), {
+  type:'doughnut',
+  data:{
+    labels:['Bronze','Silver','Gold'],
+    datasets:[{
+      data:[rndf(12,20), rndf(6,11), rndf(1,3)],
+      backgroundColor:['rgba(205,127,50,0.8)','rgba(148,163,184,0.8)','rgba(245,158,11,0.8)'],
+      borderColor:'#1a1d27', borderWidth:3
+    }]
+  },
+  options:{
+    responsive:true, maintainAspectRatio:false,
+    plugins:{
+      legend:{ position:'bottom', labels:{color:'#e2e8f0', padding:10} },
+      tooltip:{ callbacks:{ label: ctx=>' '+ctx.raw.toFixed(1)+' GB' } }
+    },
+    cutout:'60%'
+  }
+});
+
+/* ── Tab switching ── */
+function switchTab(name){
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+</script>
+</body>
+</html>
